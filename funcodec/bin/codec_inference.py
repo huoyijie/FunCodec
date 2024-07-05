@@ -239,7 +239,7 @@ def inference_modelscope(
                 uttid = os.path.basename(raw_inputs).rsplit(".")[0]
                 raw_inputs, sr = librosa.load(raw_inputs, sr=sampling_rate)
             if isinstance(raw_inputs, torch.Tensor):
-                raw_inputs = raw_inputs.numpy()
+                raw_inputs = raw_inputs.cpu().numpy()
             data_dict=dict(
                 speech=raw_inputs[np.newaxis, :],
                 speech_lengths=torch.tensor([raw_inputs.shape[0]], dtype=torch.int64)
@@ -343,7 +343,7 @@ def inference_modelscope(
 
             run_mod = kwargs.get("run_mod", "inference")
             token_id, token_emb, recon_speech, sub_quants = my_model(
-                **batch, need_recon=True,
+                **batch, need_recon=(run_mod=="decode"),
                 bit_width=param_dict["bit_width"] if param_dict is not None and "bit_width" in param_dict else bit_width,
                 use_scale=use_scale,
                 run_mod=run_mod
@@ -365,7 +365,7 @@ def inference_modelscope(
                     codec_len = torch.ceil(ilen / my_model.model.quantizer.encoder_hop_length).int().item()
                 if recon_speech is not None:
                     recon_wav = recon_speech[i].cpu()[:, :ilen]
-                item = {"key": key, "value": recon_wav}
+                item = token_id[0] if run_mod == "encode" else recon_wav
                 if output_path is not None:
                     if recon_wav is not None:
                         save_audio(recon_wav, os.path.join(output_path, key+".wav" if not key.endswith(".wav") else key), rescale=True,
