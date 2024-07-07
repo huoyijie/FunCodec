@@ -22,8 +22,8 @@ def encode(wav: ndarray):
 
 
 if __name__ == "__main__":
-    audio_in = ("/home/huoyijie/work/py/voicegpt/outputs/wenetspeech/wav/"
+    wav_path = ("/home/huoyijie/work/py/voicegpt/outputs/wenetspeech/wav/"
                 "X0000000000_100638174/S00002.wav")
-    wav, sr = librosa.load(audio_in, sr=None)
+    wav, sr = librosa.load(wav_path, sr=None)
     tokens = encode(wav)
     print(tokens.shape)
