@@ -1,9 +1,10 @@
 import torch
+import torch.nn.functional as F
 import librosa
 from modelscope.pipelines import pipeline
 from modelscope.utils.constant import Tasks
 from audio_to_token import encode
-from funcodec.bin.codec_inference import save_audio
+from funcodec.bin.codec_inference import postprocess, save_audio, save_wav
 
 pipeline_aq = pipeline(
     task=Tasks.audio_quantization,
@@ -14,7 +15,8 @@ pipeline_aq = pipeline(
 
 def decode(tokens: torch.Tensor) -> torch.Tensor:
     res = pipeline_aq(tokens)
-    return res["output"][0]  # type: ignore
+    wav = res["output"][0]  # type: ignore
+    return postprocess(wav, rescale=True)
 
 
 if __name__ == "__main__":
@@ -24,9 +26,8 @@ if __name__ == "__main__":
     print(wav.shape)
     tokens = encode(wav)
 
-    save_audio(
-        decode(tokens),
-        "outputs/S00002.wav",
-        sample_rate=int(sr),
-        rescale=True,
-    )
+    decoded_wav = decode(tokens)
+    loss = F.mse_loss(torch.from_numpy(wav), decoded_wav[0, :wav.shape[-1]])
+    print(loss)
+
+    save_wav(decoded_wav, "outputs/S00002.wav", int(sr))

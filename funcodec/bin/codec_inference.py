@@ -51,15 +51,15 @@ class Speech2Token(nn.Module):
     """
 
     def __init__(
-            self,
-            config_file: Union[Path, str] = None,
-            model_file: Union[Path, str] = None,
-            device: str = "cpu",
-            batch_size: int = 1,
-            dtype: str = "float32",
-            streaming: bool = False,
-            sampling_rate: int = 24_000,
-            bit_width: int = 24_000,
+        self,
+        config_file: Union[Path, str] = None,
+        model_file: Union[Path, str] = None,
+        device: str = "cpu",
+        batch_size: int = 1,
+        dtype: str = "float32",
+        streaming: bool = False,
+        sampling_rate: int = 24_000,
+        bit_width: int = 24_000,
     ):
         super().__init__()
 
@@ -68,12 +68,10 @@ class Speech2Token(nn.Module):
         with open(config_file, "rt", encoding="utf-8") as f:
             args = yaml.safe_load(f)
         model, model_args = GANSpeechCodecTask.build_model_from_file(
-            config_file=config_file,
-            model_file=model_file,
-            device=device
-        )
+            config_file=config_file, model_file=model_file, device=device)
         logging.info("model: {}".format(model))
-        logging.info("model parameter number: {}".format(statistic_model_parameters(model)))
+        logging.info("model parameter number: {}".format(
+            statistic_model_parameters(model)))
         logging.info("model arguments: {}".format(model_args))
         model.to(dtype=getattr(torch, dtype)).eval()
 
@@ -85,13 +83,13 @@ class Speech2Token(nn.Module):
 
     @torch.no_grad()
     def __call__(
-            self,
-            speech: Union[torch.Tensor, np.ndarray],
-            ppg: Optional[Union[torch.Tensor, np.ndarray]] = None,
-            need_recon: bool = True,
-            bit_width: int = None,
-            use_scale: bool = True,
-            run_mod: str = "inference",
+        self,
+        speech: Union[torch.Tensor, np.ndarray],
+        ppg: Optional[Union[torch.Tensor, np.ndarray]] = None,
+        need_recon: bool = True,
+        bit_width: int = None,
+        use_scale: bool = True,
+        run_mod: str = "inference",
     ):
         """Inference
 
@@ -107,23 +105,33 @@ class Speech2Token(nn.Module):
         if isinstance(ppg, np.ndarray):
             ppg = torch.from_numpy(ppg)
         speech = speech.to(self.device)
-        batch = [speech,]
+        batch = [
+            speech,
+        ]
         if ppg is not None:
             ppg = ppg.to(self.device)
             batch = [speech, ppg]
         if run_mod == "inference":
-            ret_dict = self.model.inference(*batch, need_recon=need_recon, bit_width=bit_width, use_scale=use_scale)
+            ret_dict = self.model.inference(*batch,
+                                            need_recon=need_recon,
+                                            bit_width=bit_width,
+                                            use_scale=use_scale)
         elif run_mod == "encode":
-            ret_dict = self.model.inference_encoding(*batch, need_recon=False, bit_width=bit_width)
+            ret_dict = self.model.inference_encoding(*batch,
+                                                     need_recon=False,
+                                                     bit_width=bit_width)
         elif run_mod == "decode_emb":
             ret_dict = self.model.inference_decoding_emb(*batch)
         else:
-            bit_per_quant = (self.model.quantizer.sampling_rate // self.model.quantizer.encoder_hop_length) * int(math.log2(self.model.quantizer.codebook_size))
+            bit_per_quant = (self.model.quantizer.sampling_rate //
+                             self.model.quantizer.encoder_hop_length) * int(
+                                 math.log2(self.model.quantizer.codebook_size))
             nq = None
             if bit_width is not None:
                 nq = int(max(bit_width // bit_per_quant, 1))
             batch[0] = batch[0][:, :, :nq]
-            hint_once(f"use {batch[0].shape[-1]} quantizers.", "infer_quantizer_num")
+            hint_once(f"use {batch[0].shape[-1]} quantizers.",
+                      "infer_quantizer_num")
             ret_dict = self.model.inference_decoding(*batch)
         results = (
             ret_dict["code_indices"],
@@ -135,8 +143,8 @@ class Speech2Token(nn.Module):
 
     @staticmethod
     def from_pretrained(
-            model_tag: Optional[str] = None,
-            **kwargs: Optional[Any],
+        model_tag: Optional[str] = None,
+        **kwargs: Optional[Any],
     ):
         """Build Speech2Token instance from the pretrained model.
 
@@ -150,36 +158,53 @@ class Speech2Token(nn.Module):
         return Speech2Token(**kwargs)
 
 
-def save_audio(wav: torch.Tensor, path: Union[Path, str],
-               sample_rate: int, rescale: bool = False):
+def postprocess(wav: torch.Tensor, rescale: bool = False):
     limit = 0.99
-    mx = wav.abs().max()
+    mx = wav.abs().max().item()
     if rescale:
         wav = wav * min(limit / mx, 1)
     else:
         wav = wav.clamp(-limit, limit)
-    torchaudio.save(path, wav, sample_rate=sample_rate, encoding='PCM_S', bits_per_sample=16)
+    return wav
+
+
+def save_wav(wav: torch.Tensor, path: Union[Path, str], sample_rate: int):
+    torchaudio.save(
+        path,
+        wav,
+        sample_rate=sample_rate,
+        encoding='PCM_S',
+        bits_per_sample=16,
+    )
+
+
+def save_audio(wav: torch.Tensor,
+               path: Union[Path, str],
+               sample_rate: int,
+               rescale: bool = False):
+    wav = postprocess(wav, rescale)
+    save_wav(wav, path, sample_rate)
 
 
 def inference_modelscope(
-        output_dir: Optional[str] = None,
-        batch_size: int = 1,
-        dtype: str = "float32",
-        ngpu: int = 1,
-        seed: int = 0,
-        num_workers: int = 0,
-        log_level: Union[int, str] = "INFO",
-        key_file: Optional[str] = None,
-        config_file: Optional[str] = "config.yaml",
-        model_file: Optional[str] = "model.pth",
-        model_tag: Optional[str] = None,
-        allow_variable_data_keys: bool = True,
-        streaming: bool = False,
-        sampling_rate: int = 16_000,
-        bit_width: int = 8_000,
-        param_dict: Optional[dict] = None,
-        use_scale: Optional[bool] = True,
-        **kwargs,
+    output_dir: Optional[str] = None,
+    batch_size: int = 1,
+    dtype: str = "float32",
+    ngpu: int = 1,
+    seed: int = 0,
+    num_workers: int = 0,
+    log_level: Union[int, str] = "INFO",
+    key_file: Optional[str] = None,
+    config_file: Optional[str] = "config.yaml",
+    model_file: Optional[str] = "model.pth",
+    model_tag: Optional[str] = None,
+    allow_variable_data_keys: bool = True,
+    streaming: bool = False,
+    sampling_rate: int = 16_000,
+    bit_width: int = 8_000,
+    param_dict: Optional[dict] = None,
+    use_scale: Optional[bool] = True,
+    **kwargs,
 ):
     # param_dict is used by modelscope, kwargs is used by argparser
     if param_dict is not None:
@@ -213,8 +238,8 @@ def inference_modelscope(
         device=device,
         dtype=dtype,
         streaming=streaming,
-        sampling_rate = sampling_rate,
-        bit_width = bit_width,
+        sampling_rate=sampling_rate,
+        bit_width=bit_width,
     )
     logging.info("model_kwargs: {}".format(model_kwargs))
     my_model = Speech2Token.from_pretrained(
@@ -225,10 +250,10 @@ def inference_modelscope(
     my_model.already_stat_flops = False
 
     def _forward(
-            data_path_and_name_and_type: Sequence[Tuple[str, str, str]] = None,
-            raw_inputs: Union[np.ndarray, torch.Tensor] = None,
-            output_dir_v2: Optional[str] = None,
-            param_dict: Optional[dict] = None,
+        data_path_and_name_and_type: Sequence[Tuple[str, str, str]] = None,
+        raw_inputs: Union[np.ndarray, torch.Tensor] = None,
+        output_dir_v2: Optional[str] = None,
+        param_dict: Optional[dict] = None,
     ):
         logging.info("param_dict: {}".format(param_dict))
         if param_dict is not None:
@@ -240,10 +265,9 @@ def inference_modelscope(
                 raw_inputs, sr = librosa.load(raw_inputs, sr=sampling_rate)
             if isinstance(raw_inputs, torch.Tensor):
                 raw_inputs = raw_inputs.cpu().numpy()
-            data_dict=dict(
-                speech=raw_inputs[np.newaxis, :],
-                speech_lengths=torch.tensor([raw_inputs.shape[0]], dtype=torch.int64)
-            )
+            data_dict = dict(speech=raw_inputs[np.newaxis, :],
+                             speech_lengths=torch.tensor([raw_inputs.shape[0]],
+                                                         dtype=torch.int64))
             loader = [([uttid], data_dict)]
         else:
             # 3. Build data-iterator
@@ -254,11 +278,12 @@ def inference_modelscope(
                 key_file=key_file,
                 num_workers=num_workers,
                 preprocess_fn=None,
-                collate_fn=GANSpeechCodecTask.build_collate_fn(argparse.Namespace(
-                    float_pad_value=0.0,
-                    int_pad_value=0,
-                    pad_mode="wrap",
-                ), False),
+                collate_fn=GANSpeechCodecTask.build_collate_fn(
+                    argparse.Namespace(
+                        float_pad_value=0.0,
+                        int_pad_value=0,
+                        pad_mode="wrap",
+                    ), False),
                 allow_variable_data_keys=allow_variable_data_keys,
                 inference=True,
             )
@@ -268,33 +293,48 @@ def inference_modelscope(
             os.makedirs(output_path, exist_ok=True)
         result_list = []
         should_resample = False
-        if "file_sampling_rate" in kwargs and kwargs["file_sampling_rate"] != sampling_rate:
-            logging.info(f"Resample from {kwargs['file_sampling_rate']} to {sampling_rate}.")
+        if "file_sampling_rate" in kwargs and kwargs[
+                "file_sampling_rate"] != sampling_rate:
+            logging.info(
+                f"Resample from {kwargs['file_sampling_rate']} to {sampling_rate}."
+            )
             should_resample = True
 
         indices_writer = None
         if "need_indices" in kwargs and kwargs["need_indices"]:
-            if "indices_save_type" in kwargs and kwargs["indices_save_type"] == "ark":
+            if "indices_save_type" in kwargs and kwargs[
+                    "indices_save_type"] == "ark":
                 outfile_path = os.path.join(output_path, "indices")
-                indices_writer = kaldiio.WriteHelper("ark,scp,f:{}.ark,{}.scp".format(outfile_path, outfile_path))
+                indices_writer = kaldiio.WriteHelper(
+                    "ark,scp,f:{}.ark,{}.scp".format(outfile_path,
+                                                     outfile_path))
             else:
-                indices_writer = open(os.path.join(output_path, "codecs.txt"), "wt")
+                indices_writer = open(os.path.join(output_path, "codecs.txt"),
+                                      "wt")
 
         sub_quants_writer = None
         if "need_sub_quants" in kwargs and kwargs["need_sub_quants"]:
             outfile_path = os.path.join(output_path, "codec_emb")
-            sub_quants_writer = kaldiio.WriteHelper("ark,scp,f:{}.ark,{}.scp".format(outfile_path, outfile_path))
+            sub_quants_writer = kaldiio.WriteHelper(
+                "ark,scp,f:{}.ark,{}.scp".format(outfile_path, outfile_path))
 
         def write_indices(_key, _indices, batch_id=0, length=None):
             if indices_writer is None:
                 return
-            if "indices_save_type" in kwargs and kwargs["indices_save_type"] == "ark":
-                to_write = [x[:, batch_id, :length].cpu().float().numpy().T for x in _indices]
+            if "indices_save_type" in kwargs and kwargs[
+                    "indices_save_type"] == "ark":
+                to_write = [
+                    x[:, batch_id, :length].cpu().float().numpy().T
+                    for x in _indices
+                ]
                 to_write = np.concatenate(to_write, axis=0)
                 indices_writer(_key, to_write)
             else:
                 # n_frame x n_q x B x T, n_frame is always 1
-                to_write = [x[:, batch_id, :length].cpu().numpy().tolist() for x in _indices]
+                to_write = [
+                    x[:, batch_id, :length].cpu().numpy().tolist()
+                    for x in _indices
+                ]
                 json_str = json.dumps(to_write)
                 indices_writer.write(_key + " " + json_str + "\n")
 
@@ -325,29 +365,42 @@ def inference_modelscope(
             if "ppg_lengths" in batch:
                 ppg_length = batch.pop("ppg_lengths")
 
-            if 'stat_flops' in kwargs and kwargs["stat_flops"] and not my_model.already_stat_flops:
-                rand_speech = torch.randn(1, sampling_rate, device=device, dtype=torch.float32)
+            if 'stat_flops' in kwargs and kwargs[
+                    "stat_flops"] and not my_model.already_stat_flops:
+                rand_speech = torch.randn(1,
+                                          sampling_rate,
+                                          device=device,
+                                          dtype=torch.float32)
                 if "ppg" in batch:
-                    rand_ppg = torch.randn(1, 100, batch["ppg"].shape[-1],
-                                           device=device, dtype=torch.float32)
-                    model_inputs = (rand_speech, rand_ppg, True, bit_width, use_scale, "inference")
+                    rand_ppg = torch.randn(1,
+                                           100,
+                                           batch["ppg"].shape[-1],
+                                           device=device,
+                                           dtype=torch.float32)
+                    model_inputs = (rand_speech, rand_ppg, True, bit_width,
+                                    use_scale, "inference")
                 else:
-                    model_inputs = (rand_speech, None, True, bit_width, use_scale, "inference")
+                    model_inputs = (rand_speech, None, True, bit_width,
+                                    use_scale, "inference")
                 # macs, params = profile(my_model, inputs=model_inputs, verbose=False)
                 # macs, params = clever_format([macs, params], "%.2f")
                 # logging.info(f"Model parameters: {params}, model flops: {macs}.")
-                macs, params, layer_info = profile(my_model, inputs=model_inputs, verbose=False, ret_layer_info=True)
+                macs, params, layer_info = profile(my_model,
+                                                   inputs=model_inputs,
+                                                   verbose=False,
+                                                   ret_layer_info=True)
                 layer_info = tree_layer_info(macs, params, layer_info, 0)
                 logging.info(f"Model layer info: \n{layer_info}")
                 my_model.already_stat_flops = True
 
             run_mod = kwargs.get("run_mod", "inference")
             token_id, token_emb, recon_speech, sub_quants = my_model(
-                **batch, need_recon=(run_mod=="decode"),
-                bit_width=param_dict["bit_width"] if param_dict is not None and "bit_width" in param_dict else bit_width,
+                **batch,
+                need_recon=(run_mod == "decode"),
+                bit_width=param_dict["bit_width"] if param_dict is not None
+                and "bit_width" in param_dict else bit_width,
                 use_scale=use_scale,
-                run_mod=run_mod
-            )
+                run_mod=run_mod)
 
             if should_resample and recon_speech is not None:
                 recon_speech = torchaudio.functional.resample(
@@ -362,18 +415,32 @@ def inference_modelscope(
                     ilen = codec_len * my_model.model.quantizer.encoder_hop_length
                 else:
                     ilen = speech_length[i]
-                    codec_len = torch.ceil(ilen / my_model.model.quantizer.encoder_hop_length).int().item()
+                    codec_len = torch.ceil(
+                        ilen / my_model.model.quantizer.encoder_hop_length
+                    ).int().item()
                 if recon_speech is not None:
                     recon_wav = recon_speech[i].cpu()[:, :ilen]
                 item = token_id[0] if run_mod == "encode" else recon_wav
                 if output_path is not None:
                     if recon_wav is not None:
-                        save_audio(recon_wav, os.path.join(output_path, key+".wav" if not key.endswith(".wav") else key), rescale=True,
-                                   sample_rate=kwargs["file_sampling_rate"] if should_resample else sampling_rate)
+                        save_audio(
+                            recon_wav,
+                            os.path.join(
+                                output_path, key +
+                                ".wav" if not key.endswith(".wav") else key),
+                            rescale=True,
+                            sample_rate=kwargs["file_sampling_rate"]
+                            if should_resample else sampling_rate)
                     if token_id is not None:
-                        write_indices(key, token_id, batch_id=i, length=codec_len)
+                        write_indices(key,
+                                      token_id,
+                                      batch_id=i,
+                                      length=codec_len)
                     if sub_quants is not None:
-                        write_sub_quants(key, sub_quants, batch_id=i, length=codec_len)
+                        write_sub_quants(key,
+                                         sub_quants,
+                                         batch_id=i,
+                                         length=codec_len)
                 else:
                     result_list.append(item)
 
@@ -383,24 +450,24 @@ def inference_modelscope(
 
 
 def inference(
-        output_dir: Optional[str],
-        batch_size: int,
-        dtype: str,
-        ngpu: int,
-        seed: int,
-        num_workers: int,
-        log_level: Union[int, str],
-        data_path_and_name_and_type: Sequence[Tuple[str, str, str]],
-        key_file: Optional[str],
-        config_file: Optional[str],
-        model_file: Optional[str],
-        model_tag: Optional[str],
-        allow_variable_data_keys: bool = True,
-        streaming: bool = False,
-        sampling_rate: int = 24_000,
-        bit_width: int = 24_000,
-        use_scale: bool = True,
-        **kwargs,
+    output_dir: Optional[str],
+    batch_size: int,
+    dtype: str,
+    ngpu: int,
+    seed: int,
+    num_workers: int,
+    log_level: Union[int, str],
+    data_path_and_name_and_type: Sequence[Tuple[str, str, str]],
+    key_file: Optional[str],
+    config_file: Optional[str],
+    model_file: Optional[str],
+    model_tag: Optional[str],
+    allow_variable_data_keys: bool = True,
+    streaming: bool = False,
+    sampling_rate: int = 24_000,
+    bit_width: int = 24_000,
+    use_scale: bool = True,
+    **kwargs,
 ):
     inference_pipeline = inference_modelscope(
         output_dir=output_dir,
@@ -476,7 +543,9 @@ def get_parser():
         action="append",
     )
     group.add_argument("--key_file", type=str_or_none)
-    group.add_argument("--allow_variable_data_keys", type=str2bool, default=False)
+    group.add_argument("--allow_variable_data_keys",
+                       type=str2bool,
+                       default=False)
 
     group = parser.add_argument_group("The model configuration related")
     group.add_argument(
@@ -493,7 +562,7 @@ def get_parser():
         "--model_tag",
         type=str,
         help="Pretrained model tag. If specify this option, *_train_config and "
-             "*_file will be overwritten",
+        "*_file will be overwritten",
     )
     parser.add_argument(
         "--batch_size",
@@ -501,30 +570,22 @@ def get_parser():
         default=1,
         help="The batch size for inference",
     )
-    parser.add_argument(
-        "--sampling_rate",
-        type=int,
-        default=24_000,
-        help="The sampling rate"
-    )
-    parser.add_argument(
-        "--file_sampling_rate",
-        type=int,
-        default=None,
-        help="The sampling rate"
-    )
-    parser.add_argument(
-        "--bit_width",
-        type=int,
-        default=16_000,
-        help="The bit width for quantized code."
-    )
-    parser.add_argument(
-        "--use_scale",
-        type=str2bool,
-        default=True,
-        help="Whether use scale for decoding."
-    )
+    parser.add_argument("--sampling_rate",
+                        type=int,
+                        default=24_000,
+                        help="The sampling rate")
+    parser.add_argument("--file_sampling_rate",
+                        type=int,
+                        default=None,
+                        help="The sampling rate")
+    parser.add_argument("--bit_width",
+                        type=int,
+                        default=16_000,
+                        help="The bit width for quantized code.")
+    parser.add_argument("--use_scale",
+                        type=str2bool,
+                        default=True,
+                        help="Whether use scale for decoding.")
     group.add_argument(
         "--need_indices",
         type=str2bool,
@@ -568,7 +629,7 @@ def main(cmd=None):
     kwargs.pop("config", None)
     if args.output_dir is None:
         jobid, n_gpu = 1, 1
-        gpuid = args.gpuid_list.split(",")[jobid-1]
+        gpuid = args.gpuid_list.split(",")[jobid - 1]
     else:
         jobid = int(args.output_dir.split(".")[-1])
         n_gpu = len(args.gpuid_list.split(","))
