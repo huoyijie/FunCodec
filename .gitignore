@@ -5,6 +5,9 @@ funcodec.egg-info
 build/
 dist/
 
+corpus/
+exp/
+results/
 .vscode/
 __pycache__
 pretrained/
